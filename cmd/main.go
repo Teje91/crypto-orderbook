@@ -114,8 +114,14 @@ func runMultiExchange(cfg config.Config, logInterval time.Duration, interrupt ch
 	var obMutex sync.Mutex
 	done := make(chan struct{})
 
+	// Get port from environment variable (Railway) or default to 8086
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8086"
+	}
+
 	// Start WebSocket server
-	wsServer := websocket.NewServer(orderbooksMap, "8086")
+	wsServer := websocket.NewServer(orderbooksMap, port)
 	go func() {
 		if err := wsServer.Start(); err != nil {
 			log.Fatalf("WebSocket server error: %v", err)

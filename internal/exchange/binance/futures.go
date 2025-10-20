@@ -144,6 +144,8 @@ func (e *FuturesExchange) GetSnapshot(ctx context.Context) (*exchange.Snapshot, 
 	}
 
 	snapshot := e.convertSnapshot(&binanceSnapshot)
+	log.Printf("[%s] Snapshot received: %d bids, %d asks, lastUpdateId=%d",
+		e.GetName(), len(snapshot.Bids), len(snapshot.Asks), snapshot.LastUpdateID)
 	return snapshot, nil
 }
 

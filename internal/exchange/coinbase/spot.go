@@ -151,6 +151,8 @@ func (e *SpotExchange) GetSnapshot(ctx context.Context) (*exchange.Snapshot, err
 			e.snapshotMu.Unlock()
 
 			if snap != nil {
+				log.Printf("[%s] Snapshot received: %d bids, %d asks",
+					e.GetName(), len(snap.Bids), len(snap.Asks))
 				return snap, nil
 			}
 			time.Sleep(100 * time.Millisecond)
@@ -211,6 +213,12 @@ func (e *SpotExchange) readMessages() {
 			event := msg.Events[0]
 
 			if event.Type == "snapshot" && !e.snapshotReceived {
+				// Log first 500 chars of raw message for debugging
+				rawMsg := string(message)
+				if len(rawMsg) > 500 {
+					rawMsg = rawMsg[:500] + "..."
+				}
+				log.Printf("[%s] Raw snapshot message: %s", e.GetName(), rawMsg)
 				e.storeSnapshot(&event)
 				e.snapshotReceived = true
 			}
@@ -234,6 +242,9 @@ func (e *SpotExchange) readMessages() {
 
 // storeSnapshot converts and stores the initial snapshot
 func (e *SpotExchange) storeSnapshot(event *Event) {
+	log.Printf("[%s] storeSnapshot called: event.Type=%s, len(event.Updates)=%d",
+		e.GetName(), event.Type, len(event.Updates))
+
 	var allBids, allAsks []exchange.PriceLevel
 
 	for _, update := range event.Updates {
@@ -254,6 +265,9 @@ func (e *SpotExchange) storeSnapshot(event *Event) {
 	}
 
 	filteredBids, filteredAsks := filterSnapshotByDistance(allBids, allAsks, 0.50)
+
+	log.Printf("[%s] Storing snapshot: received %d bids, %d asks → filtered to %d bids, %d asks",
+		e.GetName(), len(allBids), len(allAsks), len(filteredBids), len(filteredAsks))
 
 	snapshot := &exchange.Snapshot{
 		Exchange:     e.GetName(),

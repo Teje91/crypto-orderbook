@@ -127,6 +127,18 @@ func (ob *OrderBook) ProcessBufferedEvents() {
 	ob.mu.Lock()
 	defer ob.mu.Unlock()
 
+	// For exchanges without sequence IDs (like Coinbase), just apply all buffered events
+	// and mark as initialized
+	if ob.lastUpdateID == 0 {
+		log.Printf("Exchange doesn't use update IDs, applying all %d buffered events", len(ob.eventBuffer))
+		for _, event := range ob.eventBuffer {
+			ob.applyUpdate(event)
+		}
+		ob.eventBuffer = nil
+		ob.initialized = true
+		return
+	}
+
 	validEvents := make([]*exchange.DepthUpdate, 0)
 
 	for _, event := range ob.eventBuffer {

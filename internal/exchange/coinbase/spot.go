@@ -264,7 +264,7 @@ func (e *SpotExchange) storeSnapshot(event *Event) {
 		}
 	}
 
-	filteredBids, filteredAsks := filterSnapshotByDistance(allBids, allAsks, 0.50)
+	filteredBids, filteredAsks := filterSnapshotByDistance(allBids, allAsks, 0.02)
 
 	log.Printf("[%s] Storing snapshot: received %d bids, %d asks → filtered to %d bids, %d asks",
 		e.GetName(), len(allBids), len(allAsks), len(filteredBids), len(filteredAsks))

@@ -137,11 +137,18 @@ func (e *FuturesExchange) GetSnapshot(ctx context.Context) (*exchange.Snapshot, 
 	}
 	defer resp.Body.Close()
 
+	// Log HTTP status for debugging
+	log.Printf("[%s] REST API response: status=%d, url=%s", e.GetName(), resp.StatusCode, e.restURL)
+
 	var binanceSnapshot SnapshotResponse
 	if err := json.NewDecoder(resp.Body).Decode(&binanceSnapshot); err != nil {
 		e.incrementErrorCount()
 		return nil, fmt.Errorf("failed to decode snapshot: %w", err)
 	}
+
+	// Log raw response data
+	log.Printf("[%s] Raw snapshot data: lastUpdateId=%d, bids=%d, asks=%d",
+		e.GetName(), binanceSnapshot.LastUpdateID, len(binanceSnapshot.Bids), len(binanceSnapshot.Asks))
 
 	snapshot := e.convertSnapshot(&binanceSnapshot)
 	log.Printf("[%s] Snapshot received: %d bids, %d asks, lastUpdateId=%d",

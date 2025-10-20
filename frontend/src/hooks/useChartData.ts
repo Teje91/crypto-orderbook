@@ -7,7 +7,7 @@ import { filterExchangesByMarket, sortExchangesByGroup } from '@/utils/calculati
  * Memoized for performance
  */
 export function useChartData(stats: StatsData, filter: MarketFilter) {
-  const chartData05Pct = useMemo(() => {
+  const chartData05Pct = useMemo((): ChartDataPoint[] => {
     const filtered = Object.entries(stats)
       .filter(([exchange]) => filterExchangesByMarket(exchange, filter));
     const sorted = sortExchangesByGroup(filtered);
@@ -18,7 +18,7 @@ export function useChartData(stats: StatsData, filter: MarketFilter) {
     }));
   }, [stats, filter]);
 
-  const chartData2Pct = useMemo(() => {
+  const chartData2Pct = useMemo((): ChartDataPoint[] => {
     const filtered = Object.entries(stats)
       .filter(([exchange]) => filterExchangesByMarket(exchange, filter));
     const sorted = sortExchangesByGroup(filtered);
@@ -29,7 +29,7 @@ export function useChartData(stats: StatsData, filter: MarketFilter) {
     }));
   }, [stats, filter]);
 
-  const chartData10Pct = useMemo(() => {
+  const chartData10Pct = useMemo((): ChartDataPoint[] => {
     const filtered = Object.entries(stats)
       .filter(([exchange]) => filterExchangesByMarket(exchange, filter));
     const sorted = sortExchangesByGroup(filtered);
@@ -40,7 +40,7 @@ export function useChartData(stats: StatsData, filter: MarketFilter) {
     }));
   }, [stats, filter]);
 
-  const chartDataTotal = useMemo(() => {
+  const chartDataTotal = useMemo((): ChartDataPoint[] => {
     const filtered = Object.entries(stats)
       .filter(([exchange]) => filterExchangesByMarket(exchange, filter));
     const sorted = sortExchangesByGroup(filtered);

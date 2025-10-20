@@ -27,7 +27,13 @@ function App() {
   const { isDark, toggleTheme } = useTheme();
   const [marketFilter, setMarketFilter] = useLocalStorage<MarketFilter>('marketFilter', 'all');
   const [showAggregate, setShowAggregate] = useState(false);
-  const { orderbooks, stats, isConnected, setTickLevel } = useWebSocket('ws://localhost:8086/ws');
+
+  // Use production WebSocket URL in production, localhost in development
+  const wsUrl = import.meta.env.PROD
+    ? 'wss://crypto-orderbook-production.up.railway.app/ws'
+    : 'ws://localhost:8086/ws';
+
+  const { orderbooks, stats, isConnected, setTickLevel } = useWebSocket(wsUrl);
   const { chartData05Pct, chartData2Pct, chartData10Pct, chartDataTotal } = useChartData(stats, marketFilter);
 
   // Filter and sort orderbooks based on market filter

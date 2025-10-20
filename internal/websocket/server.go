@@ -256,6 +256,16 @@ func (s *Server) buildOrderbookMessage(exchange string, ob *orderbook.OrderBook,
 		return aggregatedAsks[i].Price.LessThan(aggregatedAsks[j].Price)
 	})
 
+	// Limit depth to top 20 levels per side to reduce WebSocket message size
+	// Frontend only displays ~20 levels anyway, so sending more is wasteful
+	maxDepth := 20
+	if len(aggregatedBids) > maxDepth {
+		aggregatedBids = aggregatedBids[:maxDepth]
+	}
+	if len(aggregatedAsks) > maxDepth {
+		aggregatedAsks = aggregatedAsks[:maxDepth]
+	}
+
 	// Convert bids to wire format with cumulative sums
 	bids := make([]PriceLevel, 0, len(aggregatedBids))
 	bidCumulative := decimal.Zero

@@ -192,12 +192,20 @@ func (s *Server) startDataPush() {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
+	lastLogTime := time.Now()
+
 	for range ticker.C {
 		s.clientsMux.RLock()
-		hasClients := len(s.clients) > 0
+		clientCount := len(s.clients)
 		s.clientsMux.RUnlock()
 
-		if !hasClients {
+		// Log client count every 5 seconds for debugging
+		if time.Since(lastLogTime) > 5*time.Second {
+			log.Printf("📊 Broadcasting: %d clients connected", clientCount)
+			lastLogTime = time.Now()
+		}
+
+		if clientCount == 0 {
 			continue
 		}
 

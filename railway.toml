@@ -6,4 +6,4 @@ phases.build.cmds = ["go build -ldflags='-w -s' -o out ./cmd/main.go"]
 
 [deploy]
 startCommand = "./out"
-restartPolicyType = "on-failure"
+restartPolicyType = "on_failure"

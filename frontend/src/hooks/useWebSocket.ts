@@ -71,7 +71,26 @@ export function useWebSocket(url: string) {
 
     connect();
 
+    // Reconnect when tab becomes visible again (e.g., after unlocking computer)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Check if WebSocket is disconnected
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+          console.log('Tab visible but WebSocket disconnected, reconnecting...');
+          // Clear any pending reconnect timeout
+          if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+          }
+          // Force immediate reconnection
+          connect();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }

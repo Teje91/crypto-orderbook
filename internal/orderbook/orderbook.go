@@ -358,13 +358,28 @@ func (ob *OrderBook) updateStats() {
 			}
 		}
 		if ob.bestAsk.Equal(decimal.NewFromFloat(999999999)) {
+			log.Printf("BUG: bestAsk still 999999999 after processing %d asks - first ask: %+v",
+				len(ob.asks), ob.getFirstAsk())
 			ob.bestAsk = decimal.Zero
 		}
 	} else {
 		ob.bestAsk = decimal.Zero
 	}
 
+	// Only log if there's a problem (bestAsk is zero but we have asks)
+	if ob.bestAsk.IsZero() && len(ob.asks) > 0 {
+		log.Printf("WARNING: bestAsk is ZERO but we have %d asks! bestBid=%s", len(ob.asks), ob.bestBid.String())
+	}
+
 	ob.updateCachedStats()
+}
+
+// getFirstAsk returns the first ask for debugging (must be called with mutex locked)
+func (ob *OrderBook) getFirstAsk() types.PriceLevel {
+	for _, level := range ob.asks {
+		return level
+	}
+	return types.PriceLevel{}
 }
 
 // updateCachedStats updates the stats structure with cached values (must be called with mutex locked)

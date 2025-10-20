@@ -21,7 +21,6 @@ import { Moon, Sun, Layers } from 'lucide-react';
 import { TICK_LEVELS, CHART_CONFIG } from './constants';
 import { filterExchangesByMarket, sortExchangesByGroup } from './utils/calculations';
 import type { MarketFilter } from './types';
-import bingxLogo from '@/assets/bingx.png';
 
 function App() {
   const { isDark, toggleTheme } = useTheme();
@@ -53,28 +52,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="sticky top-0 z-50 bg-card border-b border-border backdrop-blur-sm">
-        <div className="max-w-[1400px] mx-auto px-4 md:px-6 lg:px-8 py-2.5">
-          <a
-            href="https://bingx.com/en/invite/JGNQPF"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 text-sm hover:opacity-80 transition-opacity"
-          >
-            <span className="text-muted-foreground text-center sm:text-left">
-              If you'd like to support my work, consider signing up to BingX
-            </span>
-            <img src={bingxLogo} alt="BingX" className="h-5" />
-            <span className="text-primary font-medium">
-              with my referral
-            </span>
-            <span className="hidden sm:inline text-muted-foreground">•</span>
-            <span className="text-xs text-muted-foreground">
-              Low fees, great UX
-            </span>
-          </a>
-        </div>
-      </div>
       <div className="max-w-[1400px] mx-auto px-4 md:px-6 lg:px-8 py-6">
         <div className="mb-6 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">

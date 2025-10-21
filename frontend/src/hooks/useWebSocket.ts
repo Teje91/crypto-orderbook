@@ -14,7 +14,16 @@ export function useWebSocket(url: string) {
   const connectionTimeoutRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    function connect() {
+    async function connect() {
+      // Call health check endpoint first to wake up Railway's proxy
+      try {
+        const healthUrl = url.replace('wss://', 'https://').replace('ws://', 'http://').replace('/ws', '/health');
+        await fetch(healthUrl, { mode: 'cors' });
+        console.log('Health check successful');
+      } catch (error) {
+        console.warn('Health check failed, attempting connection anyway:', error);
+      }
+
       const ws = new WebSocket(url);
       wsRef.current = ws;
 

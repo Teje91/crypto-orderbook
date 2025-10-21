@@ -93,12 +93,24 @@ func NewServer(orderbooks map[string]*orderbook.OrderBook, port string) *Server 
 
 func (s *Server) Start() error {
 	http.HandleFunc("/ws", s.handleWebSocket)
+	http.HandleFunc("/health", s.handleHealth)
 
 	go s.broadcastMessages()
 	go s.startDataPush()
 
 	log.Printf("WebSocket server starting on port %s", s.port)
 	return http.ListenAndServe(":"+s.port, nil)
+}
+
+// handleHealth responds to health check requests
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ok",
+		"time":   time.Now().Unix(),
+	})
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {

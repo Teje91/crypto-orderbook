@@ -12,6 +12,7 @@ export function useWebSocket(url: string) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | undefined>(undefined);
   const connectionTimeoutRef = useRef<number | undefined>(undefined);
+  const reconnectAttempts = useRef(0);
 
   useEffect(() => {
     async function connect() {
@@ -32,11 +33,11 @@ export function useWebSocket(url: string) {
         console.log('WebSocket connected');
 
         // Set a timeout to detect stalled connections
-        // If no data is received within 10 seconds, the connection is likely stalled at Railway's proxy
+        // If no data is received within 30 seconds, the connection is likely stalled at Railway's proxy
         connectionTimeoutRef.current = window.setTimeout(() => {
           console.warn('WebSocket stalled (no data received), reconnecting...');
           ws.close();
-        }, 10000);
+        }, 30000);
       };
 
       ws.onmessage = (event) => {
@@ -45,6 +46,9 @@ export function useWebSocket(url: string) {
           clearTimeout(connectionTimeoutRef.current);
           connectionTimeoutRef.current = undefined;
         }
+
+        // Reset reconnect attempts on successful data receipt
+        reconnectAttempts.current = 0;
 
         const message: WebSocketMessage = JSON.parse(event.data);
 
@@ -87,8 +91,13 @@ export function useWebSocket(url: string) {
 
       ws.onclose = () => {
         setIsConnected(false);
-        console.log('WebSocket disconnected, reconnecting in 3s...');
-        reconnectTimeoutRef.current = window.setTimeout(connect, 3000);
+
+        // Exponential backoff: 3s, 6s, 12s, 24s, 30s (max)
+        reconnectAttempts.current++;
+        const delay = Math.min(3000 * Math.pow(2, reconnectAttempts.current - 1), 30000);
+
+        console.log(`WebSocket disconnected, reconnecting in ${delay/1000}s... (attempt ${reconnectAttempts.current})`);
+        reconnectTimeoutRef.current = window.setTimeout(connect, delay);
       };
     }
 

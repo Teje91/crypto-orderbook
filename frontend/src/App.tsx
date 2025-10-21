@@ -29,7 +29,7 @@ function App() {
 
   // Use production WebSocket URL in production, localhost in development
   const wsUrl = import.meta.env.PROD
-    ? 'wss://crypto-orderbook-production.up.railway.app/ws'
+    ? 'wss://crypto-orderbook-1l5y.onrender.com/ws'
     : 'ws://localhost:8086/ws';
 
   const { orderbooks, stats, isConnected, setTickLevel } = useWebSocket(wsUrl);

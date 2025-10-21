@@ -11,6 +11,7 @@ export function useWebSocket(url: string) {
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | undefined>(undefined);
+  const connectionTimeoutRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     function connect() {
@@ -20,9 +21,22 @@ export function useWebSocket(url: string) {
       ws.onopen = () => {
         setIsConnected(true);
         console.log('WebSocket connected');
+
+        // Set a timeout to detect stalled connections
+        // If no data is received within 10 seconds, the connection is likely stalled at Railway's proxy
+        connectionTimeoutRef.current = window.setTimeout(() => {
+          console.warn('WebSocket stalled (no data received), reconnecting...');
+          ws.close();
+        }, 10000);
       };
 
       ws.onmessage = (event) => {
+        // Clear the stalled connection timeout - we're receiving data!
+        if (connectionTimeoutRef.current) {
+          clearTimeout(connectionTimeoutRef.current);
+          connectionTimeoutRef.current = undefined;
+        }
+
         const message: WebSocketMessage = JSON.parse(event.data);
 
         if (message.type === 'orderbook') {
@@ -93,6 +107,9 @@ export function useWebSocket(url: string) {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
       }
       if (wsRef.current) {
         wsRef.current.close();

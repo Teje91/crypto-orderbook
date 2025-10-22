@@ -110,10 +110,14 @@ func (e *FuturesExchange) Connect(ctx context.Context) error {
 		},
 	}
 
+	log.Printf("[%s] Sending subscription: method=%s, type=l2Book, coin=%s", e.GetName(), subscription.Method, e.symbol)
+
 	if err := conn.WriteJSON(subscription); err != nil {
 		e.incrementErrorCount()
 		return fmt.Errorf("failed to send subscription: %w", err)
 	}
+
+	log.Printf("[%s] Subscription sent successfully, waiting for messages...", e.GetName())
 
 	go e.readMessages()
 	go e.pingLoop()
@@ -327,8 +331,12 @@ func (e *FuturesExchange) readMessages() {
 			e.incrementMessageCount()
 			e.updateLastPing()
 
+			// Debug: Log what we received
+			log.Printf("[%s] Received message - Channel: %s, Data type: %T", e.GetName(), msg.Channel, msg.Data)
+
 			// Handle subscription response
 			if msg.Channel == "subscriptionResponse" {
+				log.Printf("[%s] Subscription confirmed", e.GetName())
 				continue
 			}
 
@@ -357,6 +365,9 @@ func (e *FuturesExchange) readMessages() {
 				default:
 					log.Printf("[%s] Warning: update channel full, skipping update", e.GetName())
 				}
+			} else {
+				// Log unhandled message types
+				log.Printf("[%s] Received unhandled message channel: %s", e.GetName(), msg.Channel)
 			}
 		}
 	}

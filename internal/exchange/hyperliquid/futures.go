@@ -349,15 +349,24 @@ func (e *FuturesExchange) readMessages() {
 					continue
 				}
 
+				// Debug: Log the raw JSON
+				log.Printf("[%s] Raw message data: %s", e.GetName(), string(dataBytes))
+
 				if err := json.Unmarshal(dataBytes, &bookData); err != nil {
 					log.Printf("[%s] Error unmarshalling book data: %v", e.GetName(), err)
 					continue
 				}
 
+				log.Printf("[%s] Parsed book data - Coin: %s, Time: %d, Bids: %d, Asks: %d",
+					e.GetName(), bookData.Coin, bookData.Time, len(bookData.Levels[0]), len(bookData.Levels[1]))
+
 				canonicalUpdate := e.convertDepthUpdate(&bookData)
+
+				log.Printf("[%s] Converted update - Bids: %d, Asks: %d", e.GetName(), len(canonicalUpdate.Bids), len(canonicalUpdate.Asks))
 
 				select {
 				case e.updateChan <- canonicalUpdate:
+					log.Printf("[%s] Update sent to channel successfully", e.GetName())
 				case <-e.ctx.Done():
 					return
 				case <-e.done:

@@ -381,6 +381,11 @@ func (e *FuturesExchange) convertSnapshot(snapshot *L2BookResponse) *exchange.Sn
 		}
 	}
 
+	// Debug: Log first few levels to verify order
+	if len(bids) > 0 && len(asks) > 0 {
+		log.Printf("[%s] Snapshot: First bid=%s, First ask=%s", e.GetName(), bids[0].Price, asks[0].Price)
+	}
+
 	// Hyperliquid doesn't provide sequence IDs, only timestamps
 	// Set LastUpdateID to 0 so orderbook treats this like Coinbase (no sequence checking)
 	return &exchange.Snapshot{
@@ -410,6 +415,12 @@ func (e *FuturesExchange) convertDepthUpdate(update *WsBook) *exchange.DepthUpda
 			Price:    ask.Px,
 			Quantity: ask.Sz,
 		}
+	}
+
+	// Debug: Log to verify we're sending updates
+	if len(bids) > 0 && len(asks) > 0 {
+		log.Printf("[%s] Sending update: Bid[0]=%s, Ask[0]=%s, Total bids=%d, Total asks=%d",
+			e.GetName(), bids[0].Price, asks[0].Price, len(bids), len(asks))
 	}
 
 	// Hyperliquid doesn't provide sequence IDs, only timestamps

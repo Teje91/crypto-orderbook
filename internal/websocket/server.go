@@ -169,12 +169,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 // keepalive sends periodic ping messages to keep the WebSocket connection alive
 func (s *Server) keepalive(conn *websocket.Conn, done chan struct{}) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
 				log.Printf("Ping error: %v", err)
 				return
@@ -227,6 +228,8 @@ func (s *Server) broadcastMessages() {
 	for msg := range s.broadcast {
 		s.clientsMux.RLock()
 		for client := range s.clients {
+			// Set write deadline to prevent blocking indefinitely
+			client.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			err := client.WriteJSON(msg)
 			if err != nil {
 				log.Printf("Error writing to client: %v", err)

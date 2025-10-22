@@ -108,16 +108,21 @@ export function useWebSocket(url: string) {
     // Reconnect when tab becomes visible again (e.g., after unlocking computer)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        // Check if WebSocket is disconnected
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-          console.log('Tab visible but WebSocket disconnected, reconnecting...');
-          // Clear any pending reconnect timeout
-          if (reconnectTimeoutRef.current) {
-            clearTimeout(reconnectTimeoutRef.current);
-          }
-          // Force immediate reconnection
-          connect();
+        console.log('Tab visible, forcing WebSocket reconnection...');
+
+        // Clear any pending reconnect timeout
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
         }
+
+        // Force close existing connection (even if it thinks it's OPEN)
+        // After sleep/wake, connections are often in a "zombie" state
+        if (wsRef.current) {
+          wsRef.current.close();
+        }
+
+        // Force immediate reconnection with fresh connection
+        setTimeout(connect, 100);
       }
     };
 

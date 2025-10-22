@@ -364,17 +364,17 @@ func (e *FuturesExchange) readMessages() {
 
 // convertSnapshot converts Hyperliquid snapshot to canonical format
 func (e *FuturesExchange) convertSnapshot(snapshot *L2BookResponse) *exchange.Snapshot {
-	// Hyperliquid returns levels as [asks[], bids[]] - opposite of expected order
-	bids := make([]exchange.PriceLevel, len(snapshot.Levels[1]))
-	for i, bid := range snapshot.Levels[1] {
+	// Hyperliquid returns levels as [bids[], asks[]] in normal order
+	bids := make([]exchange.PriceLevel, len(snapshot.Levels[0]))
+	for i, bid := range snapshot.Levels[0] {
 		bids[i] = exchange.PriceLevel{
 			Price:    bid.Px,
 			Quantity: bid.Sz,
 		}
 	}
 
-	asks := make([]exchange.PriceLevel, len(snapshot.Levels[0]))
-	for i, ask := range snapshot.Levels[0] {
+	asks := make([]exchange.PriceLevel, len(snapshot.Levels[1]))
+	for i, ask := range snapshot.Levels[1] {
 		asks[i] = exchange.PriceLevel{
 			Price:    ask.Px,
 			Quantity: ask.Sz,
@@ -400,17 +400,17 @@ func (e *FuturesExchange) convertSnapshot(snapshot *L2BookResponse) *exchange.Sn
 
 // convertDepthUpdate converts Hyperliquid book update to canonical format
 func (e *FuturesExchange) convertDepthUpdate(update *WsBook) *exchange.DepthUpdate {
-	// Hyperliquid returns levels as [asks[], bids[]] - opposite of expected order
-	bids := make([]exchange.PriceLevel, len(update.Levels[1]))
-	for i, bid := range update.Levels[1] {
+	// Hyperliquid returns levels as [bids[], asks[]] in normal order
+	bids := make([]exchange.PriceLevel, len(update.Levels[0]))
+	for i, bid := range update.Levels[0] {
 		bids[i] = exchange.PriceLevel{
 			Price:    bid.Px,
 			Quantity: bid.Sz,
 		}
 	}
 
-	asks := make([]exchange.PriceLevel, len(update.Levels[0]))
-	for i, ask := range update.Levels[0] {
+	asks := make([]exchange.PriceLevel, len(update.Levels[1]))
+	for i, ask := range update.Levels[1] {
 		asks[i] = exchange.PriceLevel{
 			Price:    ask.Px,
 			Quantity: ask.Sz,

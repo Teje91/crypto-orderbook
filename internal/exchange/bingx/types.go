@@ -47,3 +47,13 @@ type FuturesWSMessage struct {
 	Data       FuturesDepthData `json:"data,omitempty"`
 	Timestamp  int64            `json:"ts,omitempty"`
 }
+
+// PingMessage represents a ping message to BingX
+type PingMessage struct {
+	Ping int64 `json:"Ping"`
+}
+
+// PongMessage represents a pong response from BingX
+type PongMessage struct {
+	Pong int64 `json:"Pong"`
+}

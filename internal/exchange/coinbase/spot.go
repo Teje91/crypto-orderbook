@@ -21,6 +21,7 @@ type SpotExchange struct {
 	symbol           string
 	wsURL            string
 	wsConn           *websocket.Conn
+	wsConnMu         sync.Mutex // Protects wsConn for concurrent writes
 	updateChan       chan *exchange.DepthUpdate
 	done             chan struct{}
 	ctx              context.Context
@@ -29,6 +30,7 @@ type SpotExchange struct {
 	snapshotReceived bool
 	snapshot         *exchange.Snapshot
 	snapshotMu       sync.Mutex
+	reconnecting     atomic.Bool // Flag to prevent multiple reconnection attempts
 }
 
 // NewSpotExchange creates a new Coinbase Spot exchange instance
@@ -99,6 +101,7 @@ func (e *SpotExchange) Connect(ctx context.Context) error {
 	log.Printf("[%s] Subscribed to level2 channel for %s", e.GetName(), e.symbol)
 
 	go e.readMessages()
+	go e.pingLoop()
 
 	return nil
 }
@@ -109,13 +112,14 @@ func (e *SpotExchange) Close() error {
 		e.cancel()
 	}
 
-	if e.wsConn != nil {
-		select {
-		case <-e.done:
-		default:
-			close(e.done)
-		}
+	// Close the done channel to signal all goroutines to stop
+	select {
+	case <-e.done:
+	default:
+		close(e.done)
+	}
 
+	if e.wsConn != nil {
 		err := e.wsConn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 		if err != nil {
@@ -127,8 +131,12 @@ func (e *SpotExchange) Close() error {
 		}
 
 		e.updateConnectionStatus(false)
-		return e.wsConn.Close()
+		e.wsConn.Close()
 	}
+
+	// Close update channel after all goroutines have stopped
+	close(e.updateChan)
+
 	return nil
 }
 
@@ -180,7 +188,7 @@ func (e *SpotExchange) Health() exchange.HealthStatus {
 
 // readMessages continuously reads WebSocket messages
 func (e *SpotExchange) readMessages() {
-	defer close(e.updateChan)
+	// Note: Don't close updateChan here since we may reconnect and reuse it
 	defer e.updateConnectionStatus(false)
 
 	for {
@@ -191,11 +199,31 @@ func (e *SpotExchange) readMessages() {
 		case <-e.done:
 			return
 		default:
-			_, message, err := e.wsConn.ReadMessage()
+			e.wsConnMu.Lock()
+			conn := e.wsConn
+			e.wsConnMu.Unlock()
+
+			if conn == nil {
+				log.Printf("[%s] Connection is nil, triggering reconnection", e.GetName())
+				go e.reconnect()
+				return
+			}
+
+			_, message, err := conn.ReadMessage()
 			if err != nil {
 				e.incrementErrorCount()
 				log.Printf("[%s] WebSocket read error: %v", e.GetName(), err)
+				// Trigger reconnection instead of just returning
+				go e.reconnect()
 				return
+			}
+
+			// Try to parse as heartbeat message first
+			var heartbeat HeartbeatMessage
+			if err := json.Unmarshal(message, &heartbeat); err == nil && heartbeat.Channel == "heartbeats" {
+				// Heartbeat received, connection is alive
+				e.updateLastPing()
+				continue
 			}
 
 			var msg WSMessage
@@ -374,6 +402,94 @@ func (e *SpotExchange) convertDepthUpdate(event *Event) *exchange.DepthUpdate {
 		Bids:          bids,
 		Asks:          asks,
 	}
+}
+
+// pingLoop monitors connection health (Coinbase sends automatic heartbeats, we just monitor)
+func (e *SpotExchange) pingLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-e.ctx.Done():
+			return
+		case <-e.done:
+			return
+		case <-ticker.C:
+			// Coinbase sends heartbeats automatically
+			// We just monitor LastPing to detect stale connections
+			health := e.Health()
+			if !health.LastPing.IsZero() && time.Since(health.LastPing) > 60*time.Second {
+				log.Printf("[%s] No heartbeat for 60s, connection may be stale", e.GetName())
+			}
+		}
+	}
+}
+
+// reconnect attempts to re-establish the WebSocket connection
+func (e *SpotExchange) reconnect() {
+	// Prevent multiple simultaneous reconnection attempts
+	if !e.reconnecting.CompareAndSwap(false, true) {
+		log.Printf("[%s] Reconnection already in progress, skipping", e.GetName())
+		return
+	}
+	defer e.reconnecting.Store(false)
+
+	log.Printf("[%s] Starting reconnection...", e.GetName())
+
+	// Close existing connection if any
+	e.wsConnMu.Lock()
+	if e.wsConn != nil {
+		e.wsConn.Close()
+		e.wsConn = nil
+	}
+	e.wsConnMu.Unlock()
+
+	// Wait before reconnecting
+	time.Sleep(5 * time.Second)
+
+	// Attempt to reconnect
+	maxAttempts := 10
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		select {
+		case <-e.ctx.Done():
+			log.Printf("[%s] Context cancelled during reconnection", e.GetName())
+			return
+		case <-e.done:
+			log.Printf("[%s] Done signal received during reconnection", e.GetName())
+			return
+		default:
+			log.Printf("[%s] Reconnection attempt %d/%d", e.GetName(), attempt, maxAttempts)
+
+			// Create new context for this connection attempt
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := e.Connect(ctx)
+			cancel()
+
+			if err == nil {
+				log.Printf("[%s] Reconnection successful!", e.GetName())
+
+				// Reset snapshot flag to get a fresh snapshot
+				e.snapshotMu.Lock()
+				e.snapshotReceived = false
+				e.snapshot = nil
+				e.snapshotMu.Unlock()
+
+				return
+			}
+
+			log.Printf("[%s] Reconnection attempt %d failed: %v", e.GetName(), attempt, err)
+
+			// Exponential backoff with max of 30 seconds
+			backoff := time.Duration(attempt) * 5 * time.Second
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
+			}
+			time.Sleep(backoff)
+		}
+	}
+
+	log.Printf("[%s] Failed to reconnect after %d attempts, giving up", e.GetName(), maxAttempts)
 }
 
 // convertToCoinbaseSymbol converts various symbol formats to Coinbase format

@@ -33,3 +33,13 @@ type Update struct {
 	PriceLevel  string `json:"price_level"`  // price
 	NewQuantity string `json:"new_quantity"` // quantity (if "0", remove level)
 }
+
+// HeartbeatMessage represents a heartbeat message from Coinbase
+type HeartbeatMessage struct {
+	Channel        string `json:"channel"`
+	ClientID       string `json:"client_id"`
+	Timestamp      string `json:"timestamp"`
+	SequenceNum    int64  `json:"sequence_num"`
+	CurrentTime    string `json:"current_time"`
+	HeartbeatCount int64  `json:"heartbeat_counter"`
+}

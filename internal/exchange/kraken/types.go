@@ -61,3 +61,22 @@ type PriceQty struct {
 	Price float64 `json:"price"`
 	Qty   float64 `json:"qty"`
 }
+
+// PingRequest represents a ping request to Kraken WebSocket
+type PingRequest struct {
+	Method string `json:"method"`
+	ReqID  int    `json:"req_id,omitempty"`
+}
+
+// PongResponse represents a pong response from Kraken WebSocket
+type PongResponse struct {
+	Method  string `json:"method"`
+	ReqID   int    `json:"req_id,omitempty"`
+	TimeIn  string `json:"time_in"`
+	TimeOut string `json:"time_out"`
+}
+
+// HeartbeatMessage represents a heartbeat message from Kraken
+type HeartbeatMessage struct {
+	Channel string `json:"channel"`
+}

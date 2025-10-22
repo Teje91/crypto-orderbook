@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -104,6 +105,10 @@ func (e *SpotExchange) GetSnapshot(ctx context.Context) (*exchange.Snapshot, err
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Add headers that OKX might require
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; OrderbookAggregator/1.0)")
+	req.Header.Set("Accept", "application/json")
+
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -111,6 +116,18 @@ func (e *SpotExchange) GetSnapshot(ctx context.Context) (*exchange.Snapshot, err
 		return nil, fmt.Errorf("failed to get snapshot: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// Check HTTP status code
+	if resp.StatusCode != http.StatusOK {
+		e.incrementErrorCount()
+		// Read body to see error message
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyPreview := string(bodyBytes)
+		if len(bodyPreview) > 200 {
+			bodyPreview = bodyPreview[:200] + "..."
+		}
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, bodyPreview)
+	}
 
 	var okxResp OrderBookResponse
 	if err := json.NewDecoder(resp.Body).Decode(&okxResp); err != nil {

@@ -110,14 +110,10 @@ func (e *FuturesExchange) Connect(ctx context.Context) error {
 		},
 	}
 
-	log.Printf("[%s] Sending subscription: method=%s, type=l2Book, coin=%s", e.GetName(), subscription.Method, e.symbol)
-
 	if err := conn.WriteJSON(subscription); err != nil {
 		e.incrementErrorCount()
 		return fmt.Errorf("failed to send subscription: %w", err)
 	}
-
-	log.Printf("[%s] Subscription sent successfully, waiting for messages...", e.GetName())
 
 	go e.readMessages()
 	go e.pingLoop()
@@ -331,12 +327,8 @@ func (e *FuturesExchange) readMessages() {
 			e.incrementMessageCount()
 			e.updateLastPing()
 
-			// Debug: Log what we received
-			log.Printf("[%s] Received message - Channel: %s, Data type: %T", e.GetName(), msg.Channel, msg.Data)
-
 			// Handle subscription response
 			if msg.Channel == "subscriptionResponse" {
-				log.Printf("[%s] Subscription confirmed", e.GetName())
 				continue
 			}
 
@@ -349,24 +341,15 @@ func (e *FuturesExchange) readMessages() {
 					continue
 				}
 
-				// Debug: Log the raw JSON
-				log.Printf("[%s] Raw message data: %s", e.GetName(), string(dataBytes))
-
 				if err := json.Unmarshal(dataBytes, &bookData); err != nil {
 					log.Printf("[%s] Error unmarshalling book data: %v", e.GetName(), err)
 					continue
 				}
 
-				log.Printf("[%s] Parsed book data - Coin: %s, Time: %d, Bids: %d, Asks: %d",
-					e.GetName(), bookData.Coin, bookData.Time, len(bookData.Levels[0]), len(bookData.Levels[1]))
-
 				canonicalUpdate := e.convertDepthUpdate(&bookData)
-
-				log.Printf("[%s] Converted update - Bids: %d, Asks: %d", e.GetName(), len(canonicalUpdate.Bids), len(canonicalUpdate.Asks))
 
 				select {
 				case e.updateChan <- canonicalUpdate:
-					log.Printf("[%s] Update sent to channel successfully", e.GetName())
 				case <-e.ctx.Done():
 					return
 				case <-e.done:
@@ -374,9 +357,6 @@ func (e *FuturesExchange) readMessages() {
 				default:
 					log.Printf("[%s] Warning: update channel full, skipping update", e.GetName())
 				}
-			} else {
-				// Log unhandled message types
-				log.Printf("[%s] Received unhandled message channel: %s", e.GetName(), msg.Channel)
 			}
 		}
 	}
@@ -400,10 +380,12 @@ func (e *FuturesExchange) convertSnapshot(snapshot *L2BookResponse) *exchange.Sn
 		}
 	}
 
+	// Hyperliquid doesn't provide sequence IDs, only timestamps
+	// Set LastUpdateID to 0 so orderbook treats this like Coinbase (no sequence checking)
 	return &exchange.Snapshot{
 		Exchange:     e.GetName(),
 		Symbol:       e.symbol,
-		LastUpdateID: snapshot.Time, // Use timestamp as update ID
+		LastUpdateID: 0,
 		Bids:         bids,
 		Asks:         asks,
 		Timestamp:    time.UnixMilli(snapshot.Time),
@@ -428,13 +410,15 @@ func (e *FuturesExchange) convertDepthUpdate(update *WsBook) *exchange.DepthUpda
 		}
 	}
 
+	// Hyperliquid doesn't provide sequence IDs, only timestamps
+	// Set all IDs to 0 so orderbook treats this like Coinbase (no sequence checking)
 	return &exchange.DepthUpdate{
 		Exchange:      e.GetName(),
 		Symbol:        update.Coin,
 		EventTime:     time.UnixMilli(update.Time),
-		FirstUpdateID: update.Time,
-		FinalUpdateID: update.Time,
-		PrevUpdateID:  update.Time - 1, // Approximation since Hyperliquid doesn't provide this
+		FirstUpdateID: 0,
+		FinalUpdateID: 0,
+		PrevUpdateID:  0,
 		Bids:          bids,
 		Asks:          asks,
 	}

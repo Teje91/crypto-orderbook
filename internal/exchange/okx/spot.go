@@ -42,7 +42,7 @@ func NewSpotExchange(config Config) *SpotExchange {
 		symbol:     config.Symbol,
 		instId:     instId,
 		restURL:    restURL,
-		updateChan: make(chan *exchange.DepthUpdate, 1000),
+		updateChan: make(chan *exchange.DepthUpdate, 5000),
 		done:       make(chan struct{}),
 		ctx:        ctx,
 		cancel:     cancel,

@@ -47,7 +47,7 @@ func NewSpotExchange(config Config) *SpotExchange {
 	ex := &SpotExchange{
 		symbol:        config.Symbol,
 		bingxSymbol:   bingxSymbol,
-		updateChan:    make(chan *exchange.DepthUpdate, 1000),
+		updateChan:    make(chan *exchange.DepthUpdate, 5000),
 		done:          make(chan struct{}),
 		ctx:           ctx,
 		cancel:        cancel,

@@ -270,6 +270,14 @@ func (ob *OrderBook) GetBufferLength() int {
 
 // applyUpdate applies a depth update to the orderbook (must be called with mutex locked)
 func (ob *OrderBook) applyUpdate(update *exchange.DepthUpdate) {
+	// If this is a snapshot update, clear existing orderbook first
+	if update.IsSnapshot {
+		ob.bids = make(map[string]types.PriceLevel)
+		ob.asks = make(map[string]types.PriceLevel)
+		ob.bestBid = decimal.Zero
+		ob.bestAsk = decimal.NewFromFloat(999999999)
+	}
+
 	bestBidChanged := false
 	bestAskChanged := false
 

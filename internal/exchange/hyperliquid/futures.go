@@ -425,6 +425,7 @@ func (e *FuturesExchange) convertDepthUpdate(update *WsBook) *exchange.DepthUpda
 
 	// Hyperliquid doesn't provide sequence IDs, only timestamps
 	// Set all IDs to 0 so orderbook treats this like Coinbase (no sequence checking)
+	// Mark as snapshot since Hyperliquid sends full orderbook (top 20 levels) each time
 	return &exchange.DepthUpdate{
 		Exchange:      e.GetName(),
 		Symbol:        update.Coin,
@@ -434,6 +435,7 @@ func (e *FuturesExchange) convertDepthUpdate(update *WsBook) *exchange.DepthUpda
 		PrevUpdateID:  0,
 		Bids:          bids,
 		Asks:          asks,
+		IsSnapshot:    true, // Full snapshot, not incremental
 	}
 }
 

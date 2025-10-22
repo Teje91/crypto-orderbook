@@ -69,6 +69,7 @@ type DepthUpdate struct {
 	PrevUpdateID  int64        // Previous update ID (for continuity checking)
 	Bids          []PriceLevel // Updated bid levels
 	Asks          []PriceLevel // Updated ask levels
+	IsSnapshot    bool         // If true, this replaces the entire orderbook (not incremental)
 }
 
 // PriceLevel represents a single price level [price, quantity]

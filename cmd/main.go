@@ -47,10 +47,10 @@ func main() {
 			Name:   exchange.Kraken,
 			Symbol: *symbol,
 		},
-		{
+		/*{
 			Name:   exchange.OKX,
 			Symbol: *symbol,
-		},
+		},*/
 		{
 			Name:   exchange.Coinbase,
 			Symbol: *symbol,

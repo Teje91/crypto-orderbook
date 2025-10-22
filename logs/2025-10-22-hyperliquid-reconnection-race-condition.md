@@ -346,4 +346,238 @@ Symbol switching behavior (brief service interruption) is by upstream design and
 
 ---
 
+## Session 2: Bid/Ask Swap & Snapshot Handling Fixes
+**Time:** October 22, 2025 (Afternoon Session)
+**Session Focus:** Fixing bid/ask data corruption and orderbook state management issues
+
+### Issues Discovered and Fixed
+
+#### Issue #1: Bid/Ask Array Indices Swapped
+**Commit:** 479ab58
+
+**Symptoms:**
+- Debug logs showed impossible orderbook states: `Bid=108014, Ask=108013`
+- Bid prices HIGHER than ask prices (market cannot function this way)
+- Previous commit 795f12b had incorrectly swapped the indices
+
+**Root Cause:**
+Testing revealed that Hyperliquid actually returns data in **normal order**:
+```go
+Levels: [bids[], asks[]]  // Index 0 = bids, Index 1 = asks
+```
+
+But our code assumed it was reversed:
+```go
+// WRONG assumption in comments:
+// "Hyperliquid returns levels as [asks[], bids[]]"
+bids := snapshot.Levels[1]  // ❌ Wrong!
+asks := snapshot.Levels[0]  // ❌ Wrong!
+```
+
+**Fix Applied:**
+Corrected the array indices in both `convertSnapshot` and `convertDepthUpdate`:
+```go
+// Correct implementation:
+bids := snapshot.Levels[0]  // ✅ Correct!
+asks := snapshot.Levels[1]  // ✅ Correct!
+```
+
+**Testing Results:**
+- Before: `Bid=108014, Ask=108013` (WRONG - bid > ask)
+- After: `Bid=108155, Ask=108156` (CORRECT - bid < ask)
+
+---
+
+#### Issue #2: Snapshot Updates Treated as Incremental Changes
+**Commit:** 04df17e
+
+**Symptoms:**
+- After the bid/ask fix, debug logs showed correct data
+- BUT display still showed crossed orderbook: `BB=108159, BA=108075`
+- Stale price levels persisting in orderbook
+- All depth metrics showing identical values
+
+**Root Cause:**
+Hyperliquid sends **full snapshots** with every update, not incremental changes:
+- Each WebSocket message contains the complete top 20 bids + top 20 asks
+- Our orderbook code treated these as **incremental updates**
+- Result: New snapshots were **added on top of old data** instead of replacing it
+
+**Example of the Problem:**
+```
+Update 1: Sends 20 levels (bid prices 108,155 down to 108,135)
+Update 2: Sends 20 NEW levels (bid prices 108,159 down to 108,139)
+
+Without fix:
+- Orderbook now has 40+ levels
+- Old price (108,159) mixed with newer price (108,075)
+- Display shows: BB=108,159 (stale), BA=108,075 (stale) = CROSSED!
+
+With fix:
+- Old levels cleared before applying new snapshot
+- Orderbook has exactly 20 fresh levels
+- Display shows: BB=108,155, BA=108,156 ✓
+```
+
+**Fix Applied:**
+
+1. **Added `IsSnapshot` field** to `DepthUpdate` struct:
+```go
+type DepthUpdate struct {
+    // ... existing fields ...
+    IsSnapshot bool  // If true, replaces entire orderbook
+}
+```
+
+2. **Set `IsSnapshot=true`** for Hyperliquid updates:
+```go
+return &exchange.DepthUpdate{
+    // ... other fields ...
+    IsSnapshot: true,  // Full snapshot, not incremental
+}
+```
+
+3. **Modified orderbook to clear stale data**:
+```go
+func (ob *OrderBook) applyUpdate(update *exchange.DepthUpdate) {
+    if update.IsSnapshot {
+        // Clear existing orderbook first
+        ob.bids = make(map[string]types.PriceLevel)
+        ob.asks = make(map[string]types.PriceLevel)
+        ob.bestBid = decimal.Zero
+        ob.bestAsk = decimal.NewFromFloat(999999999)
+    }
+    // Then apply new levels...
+}
+```
+
+**Testing Results:**
+Tested with significant market movement (107887 → 107970 → 107932 → 107964):
+- ✅ All debug logs showed Bid < Ask
+- ✅ All displays showed BB < BA
+- ✅ All spreads positive (1.0)
+- ✅ No crossed orderbooks throughout market volatility
+
+---
+
+### Critical Discovery: Hyperliquid 20-Level Limitation
+
+**Finding:**
+Hyperliquid API is **hard-limited to 20 levels per side** (20 bids + 20 asks).
+
+**Documentation Confirmed:**
+From Chainstack docs: "Returns at most 20 levels per side (bids and asks)"
+- No parameter to request more levels
+- Optional parameters (`nSigFigs`, `mantissa`) only control price aggregation, not depth
+
+**Comparison with Other Exchanges:**
+| Exchange | Levels Available | Update Type |
+|----------|-----------------|-------------|
+| Binance | 5,000 | Incremental |
+| Bybit | 1,000 | Incremental |
+| **Hyperliquid** | **20** | **Full Snapshots** |
+
+**Impact on Liquidity Depth Analysis:**
+
+For BTC at ~$108,000:
+- 0.5% depth requires: ±$540 price range
+- 2% depth requires: ±$2,160 price range
+- 10% depth requires: ±$10,800 price range
+
+Hyperliquid's 20 levels provide approximately $20-50 price range (20 levels × ~$1-2 per level).
+
+**Evidence from Logs:**
+```
+hyperliquidf  Mid: 108155.50 | Spread: 1.0000
+  DEPTH 0.5% Bids: 16.16 │ Asks: 51.04
+  DEPTH 2%:  Bids: 16.16 │ Asks: 51.04    ← SAME as 0.5%!
+  DEPTH 10%  Bids: 16.16 │ Asks: 51.04    ← SAME as 0.5%!
+```
+
+All three depth metrics show **identical values** because 20 levels don't reach beyond 0.5% depth.
+
+Compare to Binance (5000 levels):
+```
+binancef  DEPTH 0.5% Bids: 467.19 │ Asks: 450.22
+  DEPTH 2%:  Bids: 768.55 │ Asks: 731.16    ← Different!
+  DEPTH 10%  Bids: 771.65 │ Asks: 784.56    ← Different!
+```
+
+**Implications:**
+1. ✅ Hyperliquid suitable for: Spread analysis, best bid/ask, top-of-book
+2. ⚠️  Hyperliquid NOT suitable for: Deep liquidity analysis (2%, 10% depth)
+3. ⚠️  Current depth metrics for Hyperliquid are **incomplete/misleading**
+4. 📊 For accurate deep liquidity analysis, rely on Binance/Bybit
+
+**Recommended Actions:**
+- Add visual indicator showing "Limited Depth (20 levels)" for Hyperliquid
+- Consider showing actual coverage percentage instead of claimed 2%/10%
+- Use Binance/Bybit as primary sources for deep market analysis
+- Add disclaimer about Hyperliquid depth limitations
+
+---
+
+## Commit History (Complete Session)
+
+```bash
+fe5b81e debug: add logging to diagnose Hyperliquid orderbook issues
+479ab58 fix: correct bid/ask index mapping for Hyperliquid orderbook
+04df17e fix: treat Hyperliquid updates as snapshots to prevent stale data
+```
+
+---
+
+## Files Modified
+
+### Session 1 (Race Condition Fix):
+- `internal/exchange/hyperliquid/futures.go` (reconnection logic)
+
+### Session 2 (Bid/Ask & Snapshot Fixes):
+- `internal/exchange/hyperliquid/futures.go` (array indices, IsSnapshot flag)
+- `internal/exchange/types.go` (added IsSnapshot field)
+- `internal/orderbook/orderbook.go` (snapshot clearing logic)
+
+---
+
+## Production Status
+
+**Deployed:** October 22, 2025 ✅
+
+**What's Fixed:**
+1. ✅ Race condition in reconnection logic
+2. ✅ Bid/ask data corruption (reversed indices)
+3. ✅ Stale data accumulation (snapshot handling)
+4. ✅ Crossed orderbooks resolved
+5. ✅ Positive spreads maintained
+
+**Known Limitations:**
+1. ⚠️  20-level depth limit (API constraint, cannot be fixed)
+2. ⚠️  Incomplete liquidity metrics for 2% and 10% depth
+3. ℹ️  Symbol switching causes brief service interruption (by design)
+
+---
+
+## Key Learnings
+
+### Technical Insights:
+1. **API Data Formats Vary:** Never assume API data structure without testing
+2. **Snapshot vs Incremental:** Critical to distinguish between full replacements and deltas
+3. **Data Validation:** Debug logging was essential for discovering the bid/ask swap
+4. **API Limitations:** Some constraints (like 20-level limit) are infrastructure-level
+
+### Hyperliquid Architecture:
+- Uses **hybrid approach**: REST for initial snapshot, WebSocket for updates
+- Sends **full snapshots** every update (simpler but less efficient)
+- Limited to **20 levels** maximum (no workaround available)
+- Suitable for **spread/top-of-book** analysis, not deep liquidity metrics
+
+### Debugging Process:
+1. Debug logs revealed data was correct at source
+2. Display showed incorrect data
+3. Traced through data pipeline: adapter → orderbook → display
+4. Found orderbook was accumulating instead of replacing
+5. Implemented snapshot flag to distinguish update types
+
+---
+
 **Session End:** October 22, 2025

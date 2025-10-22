@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,15 +18,17 @@ import (
 
 // FuturesExchange implements the Exchange interface for Hyperliquid
 type FuturesExchange struct {
-	symbol     string
-	wsURL      string
-	restURL    string
-	wsConn     *websocket.Conn
-	updateChan chan *exchange.DepthUpdate
-	done       chan struct{}
-	ctx        context.Context
-	cancel     context.CancelFunc
-	health     atomic.Value // stores exchange.HealthStatus
+	symbol       string
+	wsURL        string
+	restURL      string
+	wsConn       *websocket.Conn
+	wsConnMu     sync.Mutex // Protects wsConn for thread-safe operations
+	updateChan   chan *exchange.DepthUpdate
+	done         chan struct{}
+	ctx          context.Context
+	cancel       context.CancelFunc
+	health       atomic.Value // stores exchange.HealthStatus
+	reconnecting atomic.Bool  // Prevents concurrent reconnection attempts
 }
 
 // Config holds configuration for Hyperliquid exchange
@@ -44,7 +47,7 @@ func NewFuturesExchange(config Config) *FuturesExchange {
 		symbol:     symbol,
 		wsURL:      "wss://api.hyperliquid.xyz/ws",
 		restURL:    "https://api.hyperliquid.xyz/info",
-		updateChan: make(chan *exchange.DepthUpdate, 1000),
+		updateChan: make(chan *exchange.DepthUpdate, 5000),
 		done:       make(chan struct{}),
 		ctx:        ctx,
 		cancel:     cancel,
@@ -82,7 +85,10 @@ func (e *FuturesExchange) Connect(ctx context.Context) error {
 		return fmt.Errorf("websocket connection failed: %w", err)
 	}
 
+	e.wsConnMu.Lock()
 	e.wsConn = conn
+	e.wsConnMu.Unlock()
+
 	e.updateConnectionStatus(true)
 	log.Printf("[%s] WebSocket connected successfully", e.GetName())
 
@@ -101,6 +107,7 @@ func (e *FuturesExchange) Connect(ctx context.Context) error {
 	}
 
 	go e.readMessages()
+	go e.pingLoop()
 
 	return nil
 }
@@ -111,14 +118,18 @@ func (e *FuturesExchange) Close() error {
 		e.cancel()
 	}
 
-	if e.wsConn != nil {
-		select {
-		case <-e.done:
-		default:
-			close(e.done)
-		}
+	select {
+	case <-e.done:
+	default:
+		close(e.done)
+	}
 
-		err := e.wsConn.WriteMessage(websocket.CloseMessage,
+	e.wsConnMu.Lock()
+	conn := e.wsConn
+	e.wsConnMu.Unlock()
+
+	if conn != nil {
+		err := conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 		if err != nil {
 			log.Printf("[%s] Error sending close message: %v", e.GetName(), err)
@@ -129,9 +140,87 @@ func (e *FuturesExchange) Close() error {
 		}
 
 		e.updateConnectionStatus(false)
-		return e.wsConn.Close()
+		return conn.Close()
 	}
 	return nil
+}
+
+// pingLoop monitors connection health by checking message timestamps
+func (e *FuturesExchange) pingLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-e.ctx.Done():
+			return
+		case <-e.done:
+			return
+		case <-ticker.C:
+			health := e.Health()
+			if !health.LastPing.IsZero() && time.Since(health.LastPing) > 60*time.Second {
+				log.Printf("[%s] No messages received for 60s, connection may be stale", e.GetName())
+				go e.reconnect()
+				return
+			}
+		}
+	}
+}
+
+// reconnect attempts to reconnect the WebSocket connection with exponential backoff
+func (e *FuturesExchange) reconnect() {
+	// Prevent multiple simultaneous reconnection attempts
+	if !e.reconnecting.CompareAndSwap(false, true) {
+		log.Printf("[%s] Reconnection already in progress, skipping", e.GetName())
+		return
+	}
+	defer e.reconnecting.Store(false)
+
+	log.Printf("[%s] Starting reconnection process", e.GetName())
+
+	// Close existing connection
+	e.wsConnMu.Lock()
+	if e.wsConn != nil {
+		e.wsConn.Close()
+		e.wsConn = nil
+	}
+	e.wsConnMu.Unlock()
+
+	maxAttempts := 10
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		select {
+		case <-e.ctx.Done():
+			log.Printf("[%s] Context cancelled during reconnection", e.GetName())
+			return
+		case <-e.done:
+			log.Printf("[%s] Shutdown signal during reconnection", e.GetName())
+			return
+		default:
+		}
+
+		log.Printf("[%s] Reconnection attempt %d/%d", e.GetName(), attempt, maxAttempts)
+
+		// Exponential backoff: 5s, 10s, 15s, ..., up to 30s
+		if attempt > 1 {
+			backoff := time.Duration(attempt-1) * 5 * time.Second
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
+			}
+			log.Printf("[%s] Waiting %v before reconnection attempt", e.GetName(), backoff)
+			time.Sleep(backoff)
+		}
+
+		// Attempt to reconnect
+		if err := e.Connect(e.ctx); err != nil {
+			log.Printf("[%s] Reconnection attempt %d failed: %v", e.GetName(), attempt, err)
+			continue
+		}
+
+		log.Printf("[%s] Reconnection successful", e.GetName())
+		return
+	}
+
+	log.Printf("[%s] Failed to reconnect after %d attempts", e.GetName(), maxAttempts)
 }
 
 // GetSnapshot fetches the initial orderbook snapshot via REST API
@@ -204,10 +293,22 @@ func (e *FuturesExchange) readMessages() {
 		case <-e.done:
 			return
 		default:
+			// Thread-safe access to connection
+			e.wsConnMu.Lock()
+			conn := e.wsConn
+			e.wsConnMu.Unlock()
+
+			if conn == nil {
+				log.Printf("[%s] Connection is nil, triggering reconnection", e.GetName())
+				go e.reconnect()
+				return
+			}
+
 			var msg WSMessage
-			if err := e.wsConn.ReadJSON(&msg); err != nil {
+			if err := conn.ReadJSON(&msg); err != nil {
 				e.incrementErrorCount()
 				log.Printf("[%s] WebSocket read error: %v", e.GetName(), err)
+				go e.reconnect()
 				return
 			}
 

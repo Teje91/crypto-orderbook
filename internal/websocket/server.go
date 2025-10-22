@@ -129,13 +129,27 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("New WebSocket client connected from %s", r.RemoteAddr)
 
+	// Start ping/pong keepalive
+	done := make(chan struct{})
+	go s.keepalive(conn, done)
+
 	defer func() {
+		close(done)
 		s.clientsMux.Lock()
 		delete(s.clients, conn)
 		s.clientsMux.Unlock()
 		conn.Close()
 		log.Printf("WebSocket client disconnected")
 	}()
+
+	// Set pong handler
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
+	// Set initial read deadline
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 	for {
 		_, message, err := conn.ReadMessage()
@@ -150,6 +164,24 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 
 		s.handleClientMessage(clientMsg)
+	}
+}
+
+// keepalive sends periodic ping messages to keep the WebSocket connection alive
+func (s *Server) keepalive(conn *websocket.Conn, done chan struct{}) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
+				log.Printf("Ping error: %v", err)
+				return
+			}
+		case <-done:
+			return
+		}
 	}
 }
 

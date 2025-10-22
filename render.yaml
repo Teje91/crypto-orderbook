@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: crypto-orderbook
+    env: go
+    region: singapore
+    plan: standard
+    buildCommand: go build -o main cmd/main.go
+    startCommand: ./main
+    envVars:
+      - key: PORT
+        value: 8080
+    healthCheckPath: /health
+    autoDeploy: true

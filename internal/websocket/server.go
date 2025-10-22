@@ -227,17 +227,20 @@ func (s *Server) setTickLevel(tick float64) {
 func (s *Server) broadcastMessages() {
 	for msg := range s.broadcast {
 		s.clientsMux.RLock()
+		// Send to each client concurrently to prevent one slow/zombie client from blocking others
 		for client := range s.clients {
-			// Set write deadline to prevent blocking indefinitely
-			client.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			err := client.WriteJSON(msg)
-			if err != nil {
-				log.Printf("Error writing to client: %v", err)
-				client.Close()
-				s.clientsMux.Lock()
-				delete(s.clients, client)
-				s.clientsMux.Unlock()
-			}
+			go func(c *websocket.Conn) {
+				// Set write deadline to prevent blocking indefinitely
+				c.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				err := c.WriteJSON(msg)
+				if err != nil {
+					log.Printf("Error writing to client: %v", err)
+					c.Close()
+					s.clientsMux.Lock()
+					delete(s.clients, c)
+					s.clientsMux.Unlock()
+				}
+			}(client)
 		}
 		s.clientsMux.RUnlock()
 	}

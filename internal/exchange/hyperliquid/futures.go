@@ -75,6 +75,15 @@ func (e *FuturesExchange) GetSymbol() string {
 
 // Connect establishes WebSocket connection to Hyperliquid
 func (e *FuturesExchange) Connect(ctx context.Context) error {
+	// Check if we're shutting down before connecting
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("context cancelled, not connecting")
+	case <-e.done:
+		return fmt.Errorf("exchange shutting down, not connecting")
+	default:
+	}
+
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
 	}
@@ -128,6 +137,7 @@ func (e *FuturesExchange) Close() error {
 	conn := e.wsConn
 	e.wsConnMu.Unlock()
 
+	var connErr error
 	if conn != nil {
 		err := conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
@@ -140,9 +150,12 @@ func (e *FuturesExchange) Close() error {
 		}
 
 		e.updateConnectionStatus(false)
-		return conn.Close()
+		connErr = conn.Close()
 	}
-	return nil
+
+	// Close the update channel after everything else is cleaned up
+	close(e.updateChan)
+	return connErr
 }
 
 // pingLoop monitors connection health by checking message timestamps
@@ -282,7 +295,6 @@ func (e *FuturesExchange) Health() exchange.HealthStatus {
 
 // readMessages continuously reads WebSocket messages
 func (e *FuturesExchange) readMessages() {
-	defer close(e.updateChan)
 	defer e.updateConnectionStatus(false)
 
 	for {

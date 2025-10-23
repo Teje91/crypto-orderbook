@@ -66,11 +66,17 @@ type PriceLevel struct {
 	Cumulative string `json:"cumulative"`
 }
 
+// Client wraps a WebSocket connection with a write mutex
+type Client struct {
+	conn      *websocket.Conn
+	writeMux  sync.Mutex
+}
+
 type Server struct {
 	orderbooks   map[string]*orderbook.OrderBook
 	port         string
 	upgrader     websocket.Upgrader
-	clients      map[*websocket.Conn]bool
+	clients      map[*Client]bool
 	clientsMux   sync.RWMutex
 	broadcast    chan interface{}
 	aggregator   *aggregation.Aggregator
@@ -82,7 +88,7 @@ func NewServer(orderbooks map[string]*orderbook.OrderBook, port string, symbolCh
 	return &Server{
 		orderbooks:   orderbooks,
 		port:         port,
-		clients:      make(map[*websocket.Conn]bool),
+		clients:      make(map[*Client]bool),
 		broadcast:    make(chan interface{}, 100),
 		aggregator:   aggregation.New(types.Tick1), // Default to 1.0 tick
 		symbolChange: symbolChange,
@@ -123,20 +129,22 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	client := &Client{conn: conn}
+
 	s.clientsMux.Lock()
-	s.clients[conn] = true
+	s.clients[client] = true
 	s.clientsMux.Unlock()
 
 	log.Printf("New WebSocket client connected from %s", r.RemoteAddr)
 
 	// Start ping/pong keepalive
 	done := make(chan struct{})
-	go s.keepalive(conn, done)
+	go s.keepalive(client, done)
 
 	defer func() {
 		close(done)
 		s.clientsMux.Lock()
-		delete(s.clients, conn)
+		delete(s.clients, client)
 		s.clientsMux.Unlock()
 		conn.Close()
 		log.Printf("WebSocket client disconnected")
@@ -168,15 +176,18 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 // keepalive sends periodic ping messages to keep the WebSocket connection alive
-func (s *Server) keepalive(conn *websocket.Conn, done chan struct{}) {
+func (s *Server) keepalive(client *Client, done chan struct{}) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
+			client.writeMux.Lock()
+			client.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			err := client.conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second))
+			client.writeMux.Unlock()
+			if err != nil {
 				log.Printf("Ping error: %v", err)
 				return
 			}
@@ -229,13 +240,17 @@ func (s *Server) broadcastMessages() {
 		s.clientsMux.RLock()
 		// Send to each client concurrently to prevent one slow/zombie client from blocking others
 		for client := range s.clients {
-			go func(c *websocket.Conn) {
+			go func(c *Client) {
+				// Use write mutex to prevent concurrent writes to same connection
+				c.writeMux.Lock()
+				defer c.writeMux.Unlock()
+
 				// Set write deadline to prevent blocking indefinitely
-				c.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				err := c.WriteJSON(msg)
+				c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				err := c.conn.WriteJSON(msg)
 				if err != nil {
 					log.Printf("Error writing to client: %v", err)
-					c.Close()
+					c.conn.Close()
 					s.clientsMux.Lock()
 					delete(s.clients, c)
 					s.clientsMux.Unlock()
